@@ -49,6 +49,8 @@ class Database:
                         start_time TIMESTAMP NOT NULL,
                         end_time TIMESTAMP NOT NULL,
                         is_started BOOLEAN DEFAULT FALSE,
+                        capacity INTEGER DEFAULT 40,
+                        available_seats INTEGER DEFAULT 40,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
@@ -58,8 +60,11 @@ class Database:
                         id SERIAL PRIMARY KEY,
                         user_id INTEGER REFERENCES users(id),
                         trip_id INTEGER REFERENCES trip(id),
+                        seat_number INTEGER,
+                        status VARCHAR(20) DEFAULT 'RESERVED',
                         purchase_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        price DECIMAL(10,2) NOT NULL
+                        price DECIMAL(10,2) NOT NULL,
+                        cancelled_at TIMESTAMP NULL
                 );
             """)
             
@@ -70,6 +75,15 @@ class Database:
                         amount DECIMAL(10,2) NOT NULL,
                         type VARCHAR(20) NOT NULL,
                         description TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+                
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS audit_log (
+                        id SERIAL PRIMARY KEY,
+                        username VARCHAR(50) NOT NULL,
+                        action VARCHAR(100) NOT NULL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
@@ -90,7 +104,7 @@ class Database:
             return False
         
         try:
-            self.conn.rollback()
+            
         
             with self.conn.cursor() as cur:
                 cur.execute(query, params or ())
@@ -109,15 +123,16 @@ class Database:
         
     def execute_select(self, query, params=None):
         if not self.conn:
-            return None
+            print("No database connection")
+            return []
         try:
             with self.conn.cursor() as cur:
                 cur.execute(query, params or ())
                 result = cur.fetchall()
-                return result if result else [] 
+                return result if result else []
         except Exception as e:
             print(f"Select query error: {e}")
-            return None
+            return []
 
     def close(self):
         if self.conn:

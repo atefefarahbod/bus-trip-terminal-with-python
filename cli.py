@@ -1,6 +1,9 @@
 from authentication import Authentication  
 from trip_manager import TripManager
-from exception import BalanceError, TripClose
+from ticket_manager import TicketManager
+from seat_manager import SeatManager
+from report_generator import ReportGenerator
+from exception import BalanceError, TripClose, NoSeatAvailableError, CancelTimePassedError
 import os
 from datetime import datetime
 
@@ -8,6 +11,9 @@ class CLI:
     def __init__(self):
         self.authentication = Authentication()
         self.trip_manager = TripManager()
+        self.ticket_manager = TicketManager()
+        self.seat_manager = SeatManager()
+        self.report_generator = ReportGenerator()
         self.is_superuser = False
 
     def clear_screen(self):
@@ -16,14 +22,14 @@ class CLI:
     def show_main_menu(self):
         while True:
             self.clear_screen()
-            print("terminal system")
-            print("1. register ")
-            print("2. login ")
-            print("3. admin entrance ")
-            print("4. view available trips")
-            print("5. exit")
+            print("Terminal System")
+            print("1. Register")
+            print("2. Login")
+            print("3. Admin Login")
+            print("4. View Available Trips")
+            print("5. Exit")
             
-            choice = input("\nplease insert your option: ")
+            choice = input("\nEnter your choice: ")
             
             if choice == '1':
                 self.register_user()
@@ -34,98 +40,105 @@ class CLI:
             elif choice == '4':
                 self.show_available_trips()
             elif choice == '5':
-                print("exit ...")
+                print("Exiting...")
                 break
             else:
-                input("invalid option press enter to exit")
+                input("Invalid option. Press enter to continue")
 
     def register_user(self):
         self.clear_screen()
-        print("register new user")
-        username = input("username: ")
-        password = input("password : ")
+        print("Register New User")
+        username = input("Username: ")
+        password = input("Password: ")
         
         if self.authentication.register(username, password):
-            print("register done successfully")
+            print("Registration successful")
         else:
-            print("error in register")
-        input("press enter")
+            print("Registration failed")
+        input("Press enter")
 
     def login_user(self):
         self.clear_screen()
-        print("login user")
-        username = input("username: ")
-        password = input("password : ")
+        print("User Login")
+        username = input("Username: ")
+        password = input("Password: ")
         
         if self.authentication.login(username, password):
-            print(f"welcome {username}!")
+            print(f"Welcome {username}!")
             self.user_dashboard()
         else:
-            print("wrong username or password")
-            input("press enter")
+            print("Invalid username or password")
+            input("Press enter")
 
     def login_admin(self):
         self.clear_screen()
-        print("admin entrance")
-        username = input("username: ")
-        password = input("password : ")
+        print("Admin Login")
+        username = input("Username: ")
+        password = input("Password: ")
         
         if self.authentication.is_superuser(username, password):
             self.is_superuser = True
-            print("you entered successfully")
+            print("Admin login successful")
             self.admin_dashboard()
         else:
-            print ("wrong info for admin")
-            input("press enter")
+            print("Invalid admin credentials")
+            input("Press enter")
 
     def show_available_trips(self):
         self.clear_screen()
-        print("available trips")
+        print("Available Trips")
         
         trips = self.trip_manager.get_available_trips()
         if not trips:
-            print("there is no availble trip")
+            print("No available trips")
         else:
             for trip in trips:
-                print(f"trip code  : {trip[0]}")
-                print(f"cost : {trip[1]} ")
-                print(f"trip started at : {trip[2]}")
-                print(f"trip end at : {trip[3]}")
+                print(f"Trip ID: {trip[0]}")
+                print(f"Cost: {trip[1]}")
+                print(f"Start: {trip[2]}")
+                print(f"End: {trip[3]}")
+                print(f"Available Seats: {trip[4]}")
                 print("-" * 40)
         
-        input("press enter")
+        input("Press enter")
 
     def user_dashboard(self):
         if not self.authentication.current_user:
             print("Error: No user logged in")
-            input("press enter")
+            input("Press enter")
             return
             
         while True:
             self.clear_screen()
-            print(f"user dashbord - {self.authentication.current_user['username']}")
-            print(f"deposit : {self.authentication.current_user['balance']}")
-            print("\n1. increse balance ")
-            print("2. view availble trips")
-            print("3. purchase ticket")
-            print("4. change password")
-            print("5. exit")
+            print(f"User Dashboard - {self.authentication.current_user['username']}")
+            print(f"Balance: {self.authentication.current_user['balance']}")
+            print("\n1. Increase Balance")
+            print("2. Reserve Ticket")
+            print("3. Purchase Ticket")
+            print("4. Cancel Ticket")
+            print("5. View My Tickets")
+            print("6. Change Password")
+            print("7. Logout")
             
-            choice = input("\nplease insert your option: ")
+            choice = input("\nEnter your choice: ")
             
             if choice == '1':
                 self.increase_balance()
             elif choice == '2':
-                self.show_ticket_history()
+                self.reserve_ticket()
             elif choice == '3':
                 self.purchase_ticket()
             elif choice == '4':
-                self.change_password()
+                self.cancel_ticket()
             elif choice == '5':
+                self.view_my_tickets()
+            elif choice == '6':
+                self.change_password()
+            elif choice == '7':
                 self.authentication.current_user = None
                 break
             else:
-                input("invalid option press enter to exit")
+                input("Invalid option. Press enter to continue")
 
     def increase_balance(self):
         if not self.authentication.current_user:
@@ -133,135 +146,261 @@ class CLI:
             return
             
         self.clear_screen()
-        print("increase balance")
+        print("Increase Balance")
         try:
-            amount = float(input("input an amount: "))
+            amount = float(input("Enter amount: "))
             if amount <= 0:
-                print("amount must be greater than zero")
+                print("Amount must be greater than zero")
             else:
-                if self.trip_manager.increase_balance(self.authentication.current_user['id'], amount):
+                username = self.authentication.current_user['username']
+                if self.trip_manager.increase_balance(self.authentication.current_user['id'], amount, username):
                     self.authentication.current_user['balance'] += amount
-                    print(f"balance incresed successfully")
+                    print("Balance increased successfully")
                 else:
-                    print("error in increse balance")
+                    print("Error increasing balance")
         except ValueError:
-            print("invalid amount")
-        input("press enter")
+            print("Invalid amount")
+        input("Press enter")
 
-    def show_ticket_history(self):
+    def reserve_ticket(self):
         if not self.authentication.current_user:
             print("No user logged in")
-            input("press enter")
+            input("Press enter")
             return
             
         self.clear_screen()
-        print("trip history")
+        print("Reserve Ticket")
         
-        tickets = self.trip_manager.get_user_tickets(self.authentication.current_user['id'])
-        if not tickets:
-            print("you have no trip")
-        else:
-            for ticket in tickets:
-                print(f"ticket id : {ticket[0]}")
-                print(f"cost : {ticket[1]}")
-                print(f"started at : {ticket[2]}")
-                print(f"end at : {ticket[3]}")
-                print(f"purchase time : {ticket[4]}")
-                print("-" * 40)
+        trips = self.trip_manager.get_available_trips()
+        if not trips:
+            print("No available trips")
+            input("Press enter")
+            return
         
-        input("press enter")
+        for trip in trips:
+            print(f"Trip ID: {trip[0]} | Cost: {trip[1]} | Start: {trip[2]} | Seats: {trip[4]}")
+        
+        try:
+            trip_id = int(input("\nEnter trip ID: "))
+            
+            trip = self.trip_manager.get_trip(trip_id)
+            if not trip:
+                print("Trip not found")
+            else:
+                try:
+                    username = self.authentication.current_user['username']
+                    if self.trip_manager.reserve_ticket(self.authentication.current_user['id'], trip_id, username):
+                        print("Ticket reserved successfully")
+                    else:
+                        print("Error reserving ticket")
+                except TripClose as e:
+                    print(f"{e.message}")
+                except NoSeatAvailableError as e:
+                    print(f"{e.message}")
+                    
+        except ValueError:
+            print("Invalid trip ID")
+        
+        input("Press enter")
 
     def purchase_ticket(self):
         if not self.authentication.current_user:
             print("No user logged in")
-            input("press enter")
+            input("Press enter")
             return
             
         self.clear_screen()
-        print("purchase ticket")
+        print("Purchase Ticket")
         
         trips = self.trip_manager.get_available_trips()
         if not trips:
-            print("there is no available trip")
-            input("press enter")
+            print("No available trips")
+            input("Press enter")
             return
         
         for trip in trips:
-            print(f"trip id {trip[0]} | cost : {trip[1]}  | started at : {trip[2]}")
+            print(f"Trip ID: {trip[0]} | Cost: {trip[1]} | Start: {trip[2]} | Seats: {trip[4]}")
         
         try:
-            trip_id = int(input("\n please enter trip code: "))
+            trip_id = int(input("\nEnter trip ID: "))
             
             trip = self.trip_manager.get_trip(trip_id)
             if not trip:
-                print("trip not found")
+                print("Trip not found")
             else:
                 try:
-                    if self.trip_manager.purchase_ticket(self.authentication.current_user['id'], trip_id):
+                    username = self.authentication.current_user['username']
+                    if self.trip_manager.purchase_ticket(self.authentication.current_user['id'], trip_id, username):
                         trip_cost = float(trip[1])
                         self.authentication.current_user['balance'] -= trip_cost
-                        print("ticket buied successfully")
+                        print("Ticket purchased successfully")
                     else:
-                        print("error in buying ticket")
+                        print("Error purchasing ticket")
                 except BalanceError as e:
                     print(f"{e.message}")
                 except TripClose as e:
                     print(f"{e.message}")
+                except NoSeatAvailableError as e:
+                    print(f"{e.message}")
                     
         except ValueError:
-            print("invalid trip code")
+            print("Invalid trip ID")
         
-        input("press enter")
+        input("Press enter")
+        
+    def cancel_ticket(self):
+        if not self.authentication.current_user:
+            print("No user logged in")
+            input("Press enter")
+            return
+        
+        self.clear_screen()
+        print("Cancel Ticket")
+        
+        tickets = self.trip_manager.get_user_tickets(self.authentication.current_user['id'])
+        if not tickets:
+            print("No tickets to cancel")
+            input("Press enter")
+            return
+        
+        print("Your tickets:")
+        for ticket in tickets:
+            print(f"Ticket ID: {ticket[0]} | Cost: {ticket[1]} | Start: {ticket[2]} | Seat: {ticket[5]} | Status: {ticket[6]}")
+        
+        try:
+            ticket_id = int(input("\nEnter ticket ID to cancel: "))
+            
+            try:
+                username = self.authentication.current_user['username']
+                if self.ticket_manager.cancel_ticket(ticket_id, self.authentication.current_user['id'], username):
+                    ticket_to_cancel = next((t for t in tickets if t[0] == ticket_id), None)
+                    if ticket_to_cancel:
+                        refund_amount = float(ticket_to_cancel[1]) * 0.8
+                        self.authentication.current_user['balance'] += refund_amount
+                        print("Ticket cancelled successfully! 80% refund ")
+                    else:
+                        print("error in showing balance")
+                else:
+                    print("Error cancelling ticket")
+            except CancelTimePassedError as e:
+                print(f"{e.message}")
+                
+        except ValueError:
+            print("Invalid ticket ID")
+        
+        input("Press enter")
 
+    def view_my_tickets(self):
+        if not self.authentication.current_user:
+            print("No user logged in")
+            input("Press enter")
+            return
+        
+        self.check_expired_reservations_for_user()
+            
+        self.clear_screen()
+        print("My Tickets")
+        
+        tickets = self.trip_manager.get_user_tickets(self.authentication.current_user['id'])
+        
+        if not tickets:
+            print("No tickets found")
+        else:
+            for ticket in tickets:
+                print(f"Ticket ID: {ticket[0]}")
+                print(f"Cost: {ticket[1]}")
+                print(f"Seat: {ticket[5]}")
+                print(f"Start: {ticket[2]}")
+                print(f"End: {ticket[3]}")
+                print(f"Purchase: {ticket[4]}")
+                print(f"Status: {ticket[6]}")
+                print("-" * 40)
+        
+        input("Press enter")
+        
+    def check_expired_reservations_for_user(self):
+        if not self.authentication.current_user:
+            print("no user found")
+            return
+        try:
+            query = """
+                SELECT DISTINCT t.trip_id, tr.start_time
+                FROM ticket t
+                JOIN trip tr ON t.trip_id = tr.id
+                WHERE t.user_id = %s
+                AND t.status = 'RESERVED'
+                AND tr.start_time <= NOW() + INTERVAL '24 hours'
+                AND tr.start_time > NOW()
+            """
+        
+            user_trips = self.authentication.db.execute_select(query, (self.authentication.current_user['id'],))
+        
+            if user_trips:
+                for trip in user_trips:
+                    self.seat_manager.cancel_expired_reservations(trip[0])
+                
+        except Exception as e:
+            print(f"Error checking expired reservations: {e}")
+            
+            
     def change_password(self):
         if not self.authentication.current_user:
             print("No user logged in")
-            input("press enter")
+            input("Press enter")
             return
             
         self.clear_screen()
-        print("change password")
-        new_password = input("new password: ")
+        print("Change Password")
+        new_password = input("New password: ")
         
         if self.authentication.change_password(new_password):
-            print("password changed successfully")
+            print("Password changed successfully")
         else:
-            print("error in changing password")
+            print("Error changing password")
         
-        input("press enter")
+        input("Press enter")
 
     def admin_dashboard(self):
         while True:
             self.clear_screen()
-            print("admin pannel")
-            print("1. manage trips")
-            print("2. view all users")
-            print("3. exit")
+            print("Admin Panel")
+            print("1. Manage Trips")
+            print("2. View All Users")
+            print("3. View Reports")
+            print("4. View Audit Logs")
+            print("5. System Statistics")
+            print("6. Logout")
             
-            choice = input("\nplease insert your option: ")
+            choice = input("\nEnter your choice: ")
             
             if choice == '1':
                 self.manage_trips()
             elif choice == '2':
                 self.show_all_users()
             elif choice == '3':
+                self.view_reports()
+            elif choice == '4':
+                self.view_audit_logs()
+            elif choice == '5':
+                self.system_statistics()
+            elif choice == '6':
                 self.is_superuser = False
                 break
             else:
-                input("invalid option press enter to exit")
+                input("Invalid option. Press enter to continue")
 
     def manage_trips(self):
         while True:
             self.clear_screen()
-            print("manage trips")
-            print("1. add new trip")
-            print("2. view all trip")
-            print("3. verify trip")
-            print("4. delete trip")
-            print("5. trip start")
-            print("6. return")
+            print("Manage Trips")
+            print("1. Add New Trip")
+            print("2. View All Trips")
+            print("3. Edit Trip")
+            print("4. Delete Trip")
+            print("5. Start Trip")
+            print("6. Back")
             
-            choice = input("\nplease insert your option: ")
+            choice = input("\nEnter your choice: ")
             
             if choice == '1':
                 self.add_trip()
@@ -276,28 +415,28 @@ class CLI:
             elif choice == '6':
                 break
             else:
-                input("invalid option press enter to exit")
+                input("Invalid option. Press enter to continue")
 
     def add_trip(self):
         self.clear_screen()
-        print("add new trip")
+        print("Add New Trip")
         try:
-            cost = float(input("trip cost: "))
-            start_time = input("start at (YYYY-MM-DD HH:MM:SS): ")
-            end_time = input("end at  (YYYY-MM-DD HH:MM:SS): ")
+            cost = float(input("Trip cost: "))
+            start_time = input("Start time (YYYY-MM-DD HH:MM:SS): ")
+            end_time = input("End time (YYYY-MM-DD HH:MM:SS): ")
             
             if not self._validate_date(start_time) or not self._validate_date(end_time):
-                print("Invalid date format! Use: 2024-01-01 10:00:00")
-                input("press enter")
+                print("Invalid date format")
+                input("Press enter")
                 return
             
             if self.trip_manager.create_trip(cost, start_time, end_time):
-                print("trip add suuccessfully")
+                print("Trip added successfully")
             else:
-                print("error in adding trip")
+                print("Error adding trip")
         except ValueError:
-            print("value error")
-        input("press enter")
+            print("Invalid value")
+        input("Press enter")
 
     def _validate_date(self, date_string):
         try:
@@ -308,106 +447,201 @@ class CLI:
 
     def show_all_trips(self):
         self.clear_screen()
-        print("all trips")
+        print("All Trips")
         
-        query = "SELECT id, cost, start_time, end_time, is_started FROM trip ORDER BY start_time"
-        trips = self.trip_manager.db.execute_select(query)
+        trips = self.trip_manager.db.execute_select("SELECT id, cost, start_time, end_time, is_started, capacity, available_seats FROM trip ORDER BY start_time")
         
         if not trips:
-            print("there is no trip")
+            print("No trips found")
         else:
             for trip in trips:
-                status = "started" if trip[4] else "waiting"
-                print(f"trip code : {trip[0]}")
-                print(f"cost : {trip[1]}")
-                print(f"start at : {trip[2]}")
-                print(f"end at : {trip[3]}")
-                print(f"status: {status}")
+                status = "Started" if trip[4] else "Waiting"
+                print(f"Trip ID: {trip[0]}")
+                print(f"Cost: {trip[1]}")
+                print(f"Start: {trip[2]}")
+                print(f"End: {trip[3]}")
+                print(f"Status: {status}")
+                print(f"Capacity: {trip[5]}, Available: {trip[6]}")
                 print("-" * 40)
         
-        input("press enter")
+        input("Press enter")
 
     def show_all_users(self):
         self.clear_screen()
-        print("all users")
+        print("All Users")
         
         users = self.trip_manager.get_all_users()
         if not users:
-            print("there is no users")
+            print("No users found")
         else:
             for user in users:
-                print(f"user id : {user[0]}")
-                print(f"username : {user[1]}")
-                print(f"balance : {user[2]}")
-                print(f"register at : {user[3]}")
+                print(f"User ID: {user[0]}")
+                print(f"Username: {user[1]}")
+                print(f"Balance: {user[2]}")
+                print(f"Registered: {user[3]}")
                 print("-" * 40)
         
-        input("press enter")
+        input("Press enter")
+
+    def view_audit_logs(self):
+        self.clear_screen()
+        print("Audit Logs")
+        
+        logs = self.authentication.db.execute_select("SELECT username, action, created_at FROM audit_log ORDER BY created_at DESC LIMIT 20")
+        
+        if not logs:
+            print("No audit logs found")
+        else:
+            print(f"{'User':<15} {'Action':<25} {'Time':<20}")
+            print("-" * 60)
+            for log in logs:
+                print(f"{log[0]:<15} {log[1]:<25} {log[2]:<20}")
+        
+        input("Press enter")
+
+    def view_reports(self):
+        self.clear_screen()
+        print("Reports")
+        print("1. Total Revenue")
+        print("2. Trip Revenue")
+        print("3. Daily Report")
+        print("4. Back")
+        
+        choice = input("\nEnter your choice: ")
+        
+        if choice == '1':
+            self.show_total_revenue()
+        elif choice == '2':
+            self.show_trip_revenue()
+        elif choice == '3':
+            self.show_daily_report()
+        elif choice == '4':
+            return
+        else:
+            input("Invalid option. Press enter to continue")
+
+    def show_total_revenue(self):
+        self.clear_screen()
+        print("Total Revenue")
+        total_revenue = self.report_generator.get_total_revenue()
+        print(f"Total Revenue: {total_revenue}")
+        input("Press enter")
+
+    def show_trip_revenue(self):
+        self.clear_screen()
+        print("Trip Revenue")
+        trip_id = input("Enter trip ID: ")
+        if trip_id.isdigit():
+            revenue = self.report_generator.get_trip_revenue(int(trip_id))
+            print(f"Revenue for trip {trip_id}: {revenue}")
+        else:
+            print("Invalid trip ID")
+        input("Press enter")
+
+    def show_daily_report(self):
+        self.clear_screen()
+        print("Daily Report")
+        date = input("Enter date (YYYY-MM-DD) or press enter for today: ")
+        if not date:
+            date = datetime.now().strftime('%Y-%m-%d')
+        
+        report = self.report_generator.get_daily_report(date)
+        if report:
+            tickets_sold, daily_income, cancelled_count = report[0]
+            print(f"Date: {date}")
+            print(f"Tickets Sold: {tickets_sold}")
+            print(f"Daily Income: {daily_income}")
+            print(f"Cancelled Tickets: {cancelled_count}")
+        else:
+            print("No data for this date")
+        input("Press enter")
+
+    def system_statistics(self):
+        self.clear_screen()
+        print("System Statistics")
+        
+        users = self.trip_manager.get_all_users()
+        users_count = len(users) if users else 0
+        
+        trips_result = self.authentication.db.execute_select("SELECT COUNT(*) FROM trip")
+        trips_count = trips_result[0][0] if trips_result else 0
+        
+        tickets_result = self.authentication.db.execute_select("SELECT COUNT(*) FROM ticket")
+        tickets_count = tickets_result[0][0] if tickets_result else 0
+        
+        total_revenue = self.report_generator.get_total_revenue()
+        
+        print(f"Total Users: {users_count}")
+        print(f"Total Trips: {trips_count}")
+        print(f"Total Tickets: {tickets_count}")
+        print(f"Total Revenue: {total_revenue}")
+        
+        input("Press enter")
 
     def edit_trip(self):
         self.clear_screen()
-        print("verify trip")
+        print("Edit Trip")
         
-        trip_id = input("please insert trip code: ")
+        trip_id = input("Enter trip ID: ")
         if not trip_id.isdigit():
-            print("invalid trip code")
-            input("press enter")
+            print("Invalid trip ID")
+            input("Press enter")
             return
         
         trip = self.trip_manager.get_trip(int(trip_id))
         if not trip:
-            print("trip not found")
-            input("press enter")
+            print("Trip not found")
+            input("Press enter")
             return
         
         try:
-            cost = float(input(f"new_cost [{trip[1]}]: ") or trip[1])
-            start_time = input(f"new start time [{trip[2]}]: ") or trip[2]
-            end_time = input(f"new end time [{trip[3]}]: ") or trip[3]
+            cost = float(input(f"New cost [{trip[1]}]: ") or trip[1])
+            start_time = input(f"New start time [{trip[2]}]: ") or trip[2]
+            end_time = input(f"New end time [{trip[3]}]: ") or trip[3]
             
             if self.trip_manager.update_trip(int(trip_id), cost, start_time, end_time):
-                print("trip update successfully")
+                print("Trip updated successfully")
             else:
-                print("error in update trip")
+                print("Error updating trip")
         except ValueError:
-            print("invalid value")
-        input("press enter")
+            print("Invalid value")
+        input("Press enter")
 
     def delete_trip(self):
         self.clear_screen()
-        print("delete trip")
+        print("Delete Trip")
         
-        trip_id = input("please input trip code : ")
+        trip_id = input("Enter trip ID: ")
         if not trip_id.isdigit():
-            print("invalid trip code")
-            input("press enter")
+            print("Invalid trip ID")
+            input("Press enter")
             return
         
-        confirm = input("are u sure u want delete this trip? (y/n): ")
+        confirm = input("Are you sure you want to delete this trip? (y/n): ")
         if confirm.lower() == 'y':
             if self.trip_manager.delete_trip(int(trip_id)):
-                print("trip delete successfully")
+                print("Trip deleted successfully")
             else:
-                print("error in deleting trip")
+                print("Error deleting trip")
         
-        input("press enter")
+        input("Press enter")
 
     def start_trip(self):
         self.clear_screen()
-        print("start trip")
+        print("Start Trip")
         
-        trip_id = input("please input trip code :")
+        trip_id = input("Enter trip ID: ")
         if not trip_id.isdigit():
-            print("invalid trip code")
-            input("press enter")
+            print("Invalid trip ID")
+            input("Press enter")
             return
         
         if self.trip_manager.start_trip(int(trip_id)):
-            print("trip started successfully")
+            print("Trip started successfully")
         else:
-            print("error in starting trip")
+            print("Error starting trip")
         
-        input("press enter")
+        input("Press enter")
 
 if __name__ == "__main__":
     cli = CLI()
