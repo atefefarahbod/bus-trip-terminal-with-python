@@ -67,7 +67,7 @@ class TripManager:
             raise TripClose()
 
         try:
-            seat_number = self.seat_manager.reserve_seat(trip_id, user_id)
+            seat_number = self.seat_manager.reserve_seat(trip_id, user_id , seat_number=None)
                         
             if seat_number:
                 self.audit_log.log_activity(username, "reserve_ticket")

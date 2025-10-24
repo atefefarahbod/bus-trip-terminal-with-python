@@ -101,12 +101,69 @@ class CLI:
                 print("-" * 40)
         
         input("Press enter")
+        
+    def check_expired_reservations_for_user(self):
+    
+        if not self.authentication.current_user:
+            return
+    
+        try:
+            user_id = self.authentication.current_user['id']
+            username = self.authentication.current_user['username']
+        
+            cancelled_count = self.seat_manager.check_and_cancel_user_expired_reservations(user_id, username)
+        
+            if cancelled_count > 0:
+                print(f"Auto-cancelled {cancelled_count} reservation(s) - trip starts within 24 hours")
+                print("These reservations were automatically cancelled")
+                input("Press enter to continue...")
+                
+        except Exception as e:
+            print(f"Error checking near-trip reservations: {e}")
+    
+    def get_user_reserved_tickets(self):
+        if not self.authentication.current_user:
+            return []
+    
+        try:
+            query = """
+                SELECT t.id, tr.id, t.price, tr.start_time, t.seat_number
+                FROM ticket t
+                JOIN trip tr ON t.trip_id = tr.id
+                WHERE t.user_id = %s
+                AND t.status = 'RESERVED'
+                AND tr.start_time > NOW()
+                ORDER BY tr.start_time
+            """
+            return self.authentication.db.execute_select(query, (self.authentication.current_user['id'],))
+        except Exception as e:
+            print(f"Error getting reserved tickets: {e}")
+            return []
+        
+    def convert_reservation_to_purchase(self, ticket_id):
+        if not self.authentication.current_user:
+            print("No user logged in")
+            return False
+    
+        try:
+            query = """
+                UPDATE ticket 
+                SET status = 'PAID', purchase_time = NOW()
+                WHERE id = %s 
+                AND status = 'RESERVED'
+                AND user_id = %s
+            """
+            return self.authentication.db.execute_query(query, (ticket_id, self.authentication.current_user['id']))
+        except Exception as e:
+            print(f"Error converting reservation: {e}")
+            return False
 
     def user_dashboard(self):
         if not self.authentication.current_user:
             print("Error: No user logged in")
             input("Press enter")
             return
+        self.check_expired_reservations_for_user()
             
         while True:
             self.clear_screen()
@@ -201,7 +258,7 @@ class CLI:
         except ValueError:
             print("Invalid trip ID")
         
-        input("Press enter")
+            input("Press enter")
 
     def purchase_ticket(self):
         if not self.authentication.current_user:
@@ -269,80 +326,124 @@ class CLI:
         
         try:
             ticket_id = int(input("\nEnter ticket ID to cancel: "))
+            ticket_to_cancel = next((t for t in tickets if t[0] == ticket_id), None)
+            if not ticket_to_cancel:
+                print("Ticket not found")
+                input("Press enter")
+                return
             
             try:
                 username = self.authentication.current_user['username']
                 if self.ticket_manager.cancel_ticket(ticket_id, self.authentication.current_user['id'], username):
-                    ticket_to_cancel = next((t for t in tickets if t[0] == ticket_id), None)
-                    if ticket_to_cancel:
+                    if ticket_to_cancel[6] == 'PAID':
                         refund_amount = float(ticket_to_cancel[1]) * 0.8
                         self.authentication.current_user['balance'] += refund_amount
-                        print("Ticket cancelled successfully! 80% refund ")
+                        print("Ticket cancelled successfully! 80% refund added to your balance.")
                     else:
-                        print("error in showing balance")
+                        print("Ticket cancelled successfully! (No refund for reserved tickets)")
                 else:
                     print("Error cancelling ticket")
             except CancelTimePassedError as e:
                 print(f"{e.message}")
-                
+            
         except ValueError:
             print("Invalid ticket ID")
-        
+    
         input("Press enter")
+                    
 
     def view_my_tickets(self):
         if not self.authentication.current_user:
             print("No user logged in")
             input("Press enter")
             return
-        
+                
         self.check_expired_reservations_for_user()
             
         self.clear_screen()
         print("My Tickets")
-        
-        tickets = self.trip_manager.get_user_tickets(self.authentication.current_user['id'])
-        
-        if not tickets:
-            print("No tickets found")
+        print("Your Reserved Tickets:")
+        reserved_tickets = self.get_user_reserved_tickets()
+        if reserved_tickets:
+            for ticket in reserved_tickets:
+                print(f"Ticket ID: {ticket[0]} | Trip: {ticket[1]} | Cost: {ticket[2]} | Start: {ticket[3]} | Seat: {ticket[4]}")
+            print("-" * 50)
         else:
-            for ticket in tickets:
-                print(f"Ticket ID: {ticket[0]}")
-                print(f"Cost: {ticket[1]}")
-                print(f"Seat: {ticket[5]}")
-                print(f"Start: {ticket[2]}")
-                print(f"End: {ticket[3]}")
-                print(f"Purchase: {ticket[4]}")
-                print(f"Status: {ticket[6]}")
-                print("-" * 40)
-        
-        input("Press enter")
-        
-    def check_expired_reservations_for_user(self):
-        if not self.authentication.current_user:
-            print("no user found")
+            print("No reserved tickets found")
+            print("-" * 40)
+            
+        trips = self.trip_manager.get_available_trips()
+        if not trips:
+            print("No available trips")
+            input("Press enter")
             return
-        try:
-            query = """
-                SELECT DISTINCT t.trip_id, tr.start_time
-                FROM ticket t
-                JOIN trip tr ON t.trip_id = tr.id
-                WHERE t.user_id = %s
-                AND t.status = 'RESERVED'
-                AND tr.start_time <= NOW() + INTERVAL '24 hours'
-                AND tr.start_time > NOW()
-            """
+    
+        print("\nAvailable Trips:")
+        for trip in trips:
+            print(f"Trip ID: {trip[0]} | Cost: {trip[1]} | Start: {trip[2]} | Seats: {trip[4]}")
+    
+        print("\nOptions:")
+        print("1. Purchase a new ticket")
+        print("2. Purchase from reserved tickets")
+    
+        choice = input("\nEnter your choice (1 or 2): ")
+    
+        if choice == '1':
         
-            user_trips = self.authentication.db.execute_select(query, (self.authentication.current_user['id'],))
+            try:
+                trip_id = int(input("\nEnter trip ID: "))
+            
+                trip = self.trip_manager.get_trip(trip_id)
+                if not trip:
+                    print("Trip not found")
+                else:
+                    try:
+                        username = self.authentication.current_user['username']
+                        if self.trip_manager.purchase_ticket(self.authentication.current_user['id'], trip_id, username):
+                            trip_cost = float(trip[1])
+                            self.authentication.current_user['balance'] -= trip_cost
+                            print("Ticket purchased successfully")
+                        else:
+                            print("Error purchasing ticket")
+                    except BalanceError as e:
+                        print(f"{e.message}")
+                    except TripClose as e:
+                        print(f"{e.message}")
+                    except NoSeatAvailableError as e:
+                        print(f"{e.message}")
+                    
+            except ValueError:
+                print("Invalid trip ID")
+    
+        elif choice == '2':
         
-            if user_trips:
-                for trip in user_trips:
-                    self.seat_manager.cancel_expired_reservations(trip[0])
+            if not reserved_tickets:
+                print("You have no reserved tickets to purchase")
+            else:
+                try:
+                    ticket_id = int(input("\nEnter reserved ticket ID to purchase: "))
                 
-        except Exception as e:
-            print(f"Error checking expired reservations: {e}")
-            
-            
+                
+                    reserved_ticket = next((t for t in reserved_tickets if t[0] == ticket_id), None)
+                    if not reserved_ticket:
+                        print("Reserved ticket not found")
+                    else:
+                    
+                        if self.convert_reservation_to_purchase(ticket_id):
+                            trip_cost = float(reserved_ticket[2])
+                            self.authentication.current_user['balance'] -= trip_cost
+                            print("Reserved ticket purchased successfully!")
+                        else:
+                            print("Error purchasing reserved ticket")
+                        
+                except ValueError:
+                    print("Invalid ticket ID")
+        else:
+            print("Invalid choice")
+    
+            input("Press enter")
+        
+                
     def change_password(self):
         if not self.authentication.current_user:
             print("No user logged in")
@@ -642,6 +743,10 @@ class CLI:
             print("Error starting trip")
         
         input("Press enter")
+    
+    
+
+    
 
 if __name__ == "__main__":
     cli = CLI()

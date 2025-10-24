@@ -12,7 +12,7 @@ class TicketManager:
 
     def cancel_ticket(self, ticket_id, user_id, username):
         query = """
-            SELECT t.start_time, tk.price, tk.user_id, tk.trip_id
+            SELECT t.start_time, tk.price, tk.user_id, tk.trip_id, tk.status
             FROM ticket tk
             JOIN trip t ON tk.trip_id = t.id
             WHERE tk.id = %s
@@ -22,7 +22,7 @@ class TicketManager:
         if not result:
             return False
         
-        start_time, price, ticket_user_id, trip_id = result[0]
+        start_time, price, ticket_user_id, trip_id , ticket_status = result[0]
         
       
         if ticket_user_id != user_id:
@@ -30,11 +30,10 @@ class TicketManager:
         
         
         if datetime.now() > start_time - timedelta(hours=2):
-            raise CancelTimePassedError()
+            raise CancelTimePassedError() 
         
         price_float = float(price)
-        refund_amount = price_float * 0.8
-        
+        refund_amount = price_float * 0.8      
       
         update_query = """
             UPDATE ticket
@@ -43,15 +42,14 @@ class TicketManager:
         """
         success = self.db.execute_query(update_query, (ticket_id,))
         
-        if success: 
-           
-            self.trip_manager.increase_balance(user_id, refund_amount, username)  
-            
+        if success:
+            if ticket_status == 'PAID':                               
+                self.trip_manager.increase_balance(user_id, refund_amount, username)  
+                self.audit_logger.log_activity(username, "payment refund")
            
             self.free_seat(trip_id)
             
           
-            self.audit_logger.log_activity(username, "PAYMENT_TICKET_REFUND")
             
             return True
         return False

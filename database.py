@@ -132,6 +132,7 @@ class Database:
                 return result if result else []
         except Exception as e:
             print(f"Select query error: {e}")
+            self.conn.rollback()
             return []
 
     def close(self):
